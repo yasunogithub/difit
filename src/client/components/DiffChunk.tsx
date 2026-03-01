@@ -1,5 +1,13 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  useCallback,
+  useLayoutEffect,
+  memo,
+} from 'react';
 
 import {
   type DiffChunk as DiffChunkType,
@@ -113,9 +121,11 @@ export const DiffChunk = memo(function DiffChunk({
   filename,
   onOpenInEditor,
 }: DiffChunkProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [startLine, setStartLine] = useState<number | null>(null);
   const [endLine, setEndLine] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [scrollMargin, setScrollMargin] = useState(0);
   const [commentingLine, setCommentingLine] = useState<{
     side: DiffSide;
     lineNumber: LineNumber;
@@ -448,6 +458,31 @@ export const DiffChunk = memo(function DiffChunk({
   const shouldVirtualizeUnified =
     mode === 'unified' && unifiedRows.length >= UNIFIED_VIRTUALIZATION_ROW_THRESHOLD;
 
+  useLayoutEffect(() => {
+    if (!shouldVirtualizeUnified) {
+      return;
+    }
+
+    const container = containerRef.current;
+    const scrollContainer = document.querySelector(
+      NAVIGATION_SELECTORS.SCROLL_CONTAINER,
+    ) as HTMLElement | null;
+    if (!container || !scrollContainer) {
+      return;
+    }
+
+    const rafId = requestAnimationFrame(() => {
+      const containerRect = container.getBoundingClientRect();
+      const scrollRect = scrollContainer.getBoundingClientRect();
+      const nextMargin = scrollContainer.scrollTop + (containerRect.top - scrollRect.top);
+      setScrollMargin((prev) => (Math.abs(prev - nextMargin) < 0.5 ? prev : nextMargin));
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [shouldVirtualizeUnified, unifiedRows.length]);
+
   const unifiedRowVirtualizer = useVirtualizer({
     count: unifiedRows.length,
     enabled: shouldVirtualizeUnified,
@@ -456,6 +491,7 @@ export const DiffChunk = memo(function DiffChunk({
     estimateSize: (index) =>
       unifiedRows[index]?.virtual.estimatedHeight ?? ESTIMATED_ROW_HEIGHTS.line,
     getItemKey: (index) => unifiedRows[index]?.virtual.id ?? index,
+    scrollMargin,
     overscan: 24,
   });
 
@@ -676,7 +712,7 @@ export const DiffChunk = memo(function DiffChunk({
       : 0;
 
   return (
-    <div className="bg-github-bg-primary">
+    <div ref={containerRef} className="bg-github-bg-primary">
       <table className="w-full table-fixed border-collapse font-mono text-sm leading-5">
         <tbody>
           {shouldVirtualizeUnified && paddingTop > 0 && (

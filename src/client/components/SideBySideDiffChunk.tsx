@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from 'react';
 
 import {
   type DiffChunk as DiffChunkType,
@@ -138,9 +138,11 @@ export function SideBySideDiffChunk({
   filename,
   onOpenInEditor,
 }: SideBySideDiffChunkProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [startLine, setStartLine] = useState<LineSelection | null>(null);
   const [endLine, setEndLine] = useState<LineSelection | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [scrollMargin, setScrollMargin] = useState(0);
   const [commentingLine, setCommentingLine] = useState<{
     side: DiffSide;
     lineNumber: LineNumber;
@@ -500,6 +502,31 @@ export function SideBySideDiffChunk({
 
   const shouldVirtualizeSplit = splitRows.length >= SPLIT_VIRTUALIZATION_ROW_THRESHOLD;
 
+  useLayoutEffect(() => {
+    if (!shouldVirtualizeSplit) {
+      return;
+    }
+
+    const container = containerRef.current;
+    const scrollContainer = document.querySelector(
+      NAVIGATION_SELECTORS.SCROLL_CONTAINER,
+    ) as HTMLElement | null;
+    if (!container || !scrollContainer) {
+      return;
+    }
+
+    const rafId = requestAnimationFrame(() => {
+      const containerRect = container.getBoundingClientRect();
+      const scrollRect = scrollContainer.getBoundingClientRect();
+      const nextMargin = scrollContainer.scrollTop + (containerRect.top - scrollRect.top);
+      setScrollMargin((prev) => (Math.abs(prev - nextMargin) < 0.5 ? prev : nextMargin));
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [shouldVirtualizeSplit, splitRows.length]);
+
   const splitRowVirtualizer = useVirtualizer({
     count: splitRows.length,
     enabled: shouldVirtualizeSplit,
@@ -508,6 +535,7 @@ export function SideBySideDiffChunk({
     estimateSize: (index) =>
       splitRows[index]?.virtual.estimatedHeight ?? SPLIT_ESTIMATED_HEIGHTS.line,
     getItemKey: (index) => splitRows[index]?.virtual.id ?? index,
+    scrollMargin,
     overscan: 24,
   });
 
@@ -904,7 +932,7 @@ export function SideBySideDiffChunk({
       : 0;
 
   return (
-    <div className="bg-github-bg-primary overflow-hidden">
+    <div ref={containerRef} className="bg-github-bg-primary overflow-hidden">
       <table className="w-full table-fixed border-collapse font-mono text-sm leading-5">
         <tbody>
           {shouldVirtualizeSplit && paddingTop > 0 && (
